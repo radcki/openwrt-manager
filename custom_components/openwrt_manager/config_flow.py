@@ -17,7 +17,7 @@ from homeassistant.const import (
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
 
-from .const import (  # CONF_VERIFY_SSL,
+from .const import (
     ACTION_DROP,
     ACTION_REJECT,
     CONF_FIREWALL_ACTION,
@@ -28,13 +28,13 @@ from .const import (  # CONF_VERIFY_SSL,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
 )
-from .openwrt_client.OpenWrtClient import (
+from .openwrt_client.openwrt_client import (
     CannotConnect,
     EndpointNotUbus,
     InvalidAuth,
     OpenWrtClient,
 )
-from .openwrt_client.OpenWrtManager import OpenWrtManager
+from .openwrt_client.openwrt_manager import OpenWrtManager
 
 _LOGGER = logging.getLogger(__name__)
 
