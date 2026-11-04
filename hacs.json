@@ -1,5 +1,5 @@
 {
-  "name": "OpenWrt Router Client Manager",
+  "name": "OpenWrt Router Manager",
   "content_in_root": false,
   "filename": "custom_components/openwrt_manager",
   "render_readme": true,
