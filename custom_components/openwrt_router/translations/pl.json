@@ -1,0 +1,58 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Połącz z routerem OpenWrt",
+        "description": "Wprowadź dane połączenia SSH dla swojego routera OpenWrt.",
+        "data": {
+          "host": "Nazwa hosta lub adres IP routera",
+          "port": "Port",
+          "username": "Nazwa użytkownika",
+          "password": "Hasło",
+          "firewall_action": "Akcja blokowania zapory sieciowej",
+          "firewall_rule_name": "Nazwa reguły zarządzanej reguły zapory sieciowej",
+          "scan_interval": "Interwał odświeżania (sekundy)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Nie udało się połączyć z routerem OpenWrt. Sprawdź IP, port oraz dostępność sieci.",
+      "invalid_auth": "Uwierzytelnianie nie powiodło się. Sprawdź nazwę użytkownika i hasło.",
+      "unknown": "Wystąpił nieoczekiwany błąd."
+    },
+    "abort": {
+      "already_configured": "Ten router OpenWrt jest już skonfigurowany."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Opcje routera OpenWrt",
+        "data": {
+          "scan_interval": "Interwał odświeżania (sekundy)",
+          "firewall_action": "Akcja blokowania zapory sieciowej (REJECT lub DROP)"
+        }
+      }
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "connectivity": {
+        "name": "Połączenie"
+      }
+    },
+    "switch": {
+      "internet_access": {
+        "name": "Dostęp do Internetu"
+      }
+    },
+    "sensor": {
+      "ip_address": {
+        "name": "Adres IP"
+      },
+      "signal_strength": {
+        "name": "Siła sygnału"
+      }
+    }
+  }
+}

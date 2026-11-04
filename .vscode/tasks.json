@@ -1,0 +1,55 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Lint with Ruff",
+      "type": "shell",
+      "command": "uv run ruff check .",
+      "problemMatcher": ["$ruff"],
+      "group": {
+        "kind": "test",
+        "isDefault": false
+      }
+    },
+    {
+      "label": "Format with Ruff",
+      "type": "shell",
+      "command": "uv run ruff format .",
+      "problemMatcher": []
+    },
+    {
+      "label": "Type check with mypy",
+      "type": "shell",
+      "command": "uv run mypy custom_components/openwrt_router",
+      "problemMatcher": ["$mypy"]
+    },
+    {
+      "label": "Run Tests",
+      "type": "shell",
+      "command": "uv run pytest",
+      "group": {
+        "kind": "test",
+        "isDefault": true
+      }
+    },
+    {
+      "label": "Start Mock OpenWrt Server",
+      "type": "shell",
+      "command": "uv run python scripts/mock_openwrt_server.py --port 8080",
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "Start Home Assistant Docker",
+      "type": "shell",
+      "command": "docker compose up -d",
+      "problemMatcher": []
+    },
+    {
+      "label": "Stop Home Assistant Docker",
+      "type": "shell",
+      "command": "docker compose down",
+      "problemMatcher": []
+    }
+  ]
+}

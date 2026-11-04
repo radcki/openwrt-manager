@@ -1,0 +1,58 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to OpenWrt Router",
+        "description": "Provide the SSH connection details for your OpenWrt router.",
+        "data": {
+          "host": "Router Hostname or IP",
+          "port": "Port",
+          "username": "Username",
+          "password": "Password",
+          "firewall_action": "Firewall Block Action",
+          "firewall_rule_name": "Firewall Managed Rule Name",
+          "scan_interval": "Scan Interval (seconds)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to OpenWrt router. Check IP, port, and network reachability.",
+      "invalid_auth": "Authentication failed. Check your username and password.",
+      "unknown": "Unexpected error occurred."
+    },
+    "abort": {
+      "already_configured": "This OpenWrt router is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "OpenWrt Router Options",
+        "data": {
+          "scan_interval": "Scan Interval (seconds)",
+          "firewall_action": "Firewall Block Action (REJECT or DROP)"
+        }
+      }
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "connectivity": {
+        "name": "Connection"
+      }
+    },
+    "switch": {
+      "internet_access": {
+        "name": "Internet Access"
+      }
+    },
+    "sensor": {
+      "ip_address": {
+        "name": "IP Address"
+      },
+      "signal_strength": {
+        "name": "Signal Strength"
+      }
+    }
+  }
+}

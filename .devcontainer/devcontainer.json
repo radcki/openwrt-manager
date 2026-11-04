@@ -1,0 +1,16 @@
+{
+  "name": "Home Assistant Custom Component Dev",
+  "image": "ghcr.io/home-assistant/devcontainer:addons",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.debugpy",
+        "charliermarsh.ruff",
+        "matangover.mypy",
+        "keesschollaart.vscode-home-assistant"
+      ]
+    }
+  },
+  "remoteUser": "vscode"
+}
