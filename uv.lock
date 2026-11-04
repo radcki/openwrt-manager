@@ -1353,7 +1353,7 @@ wheels = [
 ]
 
 [[package]]
-name = "openwrt-manager"
+name = "openwrt_manager"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

@@ -3,4 +3,4 @@ default_config:
 logger:
   default: info
   logs:
-    custom_components.openwrt-manager: debug
+    custom_components.openwrt_manager: debug

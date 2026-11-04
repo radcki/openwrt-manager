@@ -15,23 +15,20 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import (
     CONF_FIREWALL_ACTION,
     CONF_FIREWALL_RULE_NAME,
-    CONF_PROTOCOL,
     DEFAULT_FIREWALL_ACTION,
     DEFAULT_FIREWALL_RULE_NAME,
     DEFAULT_PORT_SSH,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     PLATFORMS,
-    PROTOCOL_SSH,
 )
 from .coordinator import OpenWrtDataUpdateCoordinator
-from .openwrt_client.OpenWrtClient import OpenWrtClient
-from .openwrt_client.OpenWrtManager import OpenWrtManager
+from .openwrt_client.openwrt_client import OpenWrtClient
+from .openwrt_client.openwrt_manager import OpenWrtManager
 
 _LOGGER = logging.getLogger(__name__)
 

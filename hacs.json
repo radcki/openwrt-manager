@@ -1,7 +1,7 @@
 {
   "name": "OpenWrt Router Client Manager",
   "content_in_root": false,
-  "filename": "custom_components/openwrt-manager",
+  "filename": "custom_components/openwrt_manager",
   "render_readme": true,
   "homeassistant": "2026.6.4"
 }

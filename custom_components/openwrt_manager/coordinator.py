@@ -11,7 +11,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import DOMAIN
-from .openwrt_client.OpenWrtManager import ClientDevice, OpenWrtManager, RouterInfo
+from .openwrt_client.openwrt_manager import ClientDevice, OpenWrtManager, RouterInfo
 
 _LOGGER = logging.getLogger(__name__)
 

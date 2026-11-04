@@ -6,8 +6,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from custom_components.openwrt-manager.openwrt_client.OpenWrtClient import \
-    OpenWrtClient
+from openwrt_manager.openwrt_client import OpenWrtClient
 
 PROTOCOL_SSH = "ssh"
 
@@ -25,7 +24,7 @@ class FirewallRule:
     src_mac: list[str]
     enabled: bool
 
-    def as_uci_value_dict(self) -> dict[str, any]:
+    def as_uci_value_dict(self) -> dict[str, Any]:
         enabled = len(self.src_mac) > 0
         src_mac = "" if len(self.src_mac) == 0 else self.src_mac
         return {
@@ -140,8 +139,8 @@ class OpenWrtManager:
         except Exception:
             _LOGGER.debug("Using fallback MAC address for OpenWrt router")
 
-        # Over SSH fallback for primary MAC if network.device status did not return it
-        if info.mac == "00:00:00:00:00:00" and self.protocol == PROTOCOL_SSH:
+        # fallback for primary MAC if network.device status did not return it
+        if info.mac == "00:00:00:00:00:00":
             try:
                 mac_out = await self.openwrt_client.async_run_ssh_command(
                     "cat /sys/class/net/br-lan/address 2>/dev/null || cat /sys/class/net/eth0/address 2>/dev/null"
@@ -187,49 +186,48 @@ class OpenWrtManager:
             _LOGGER.debug("uci.get gl-client failed: %s", err)
 
         # SSH fallback: parse `uci show gl-client` output
-        if self.protocol == PROTOCOL_SSH:
-            try:
-                raw = await self.openwrt_client.async_run_ssh_command(
-                    "uci show gl-client 2>/dev/null"
+        try:
+            raw = await self.openwrt_client.async_run_ssh_command(
+                "uci show gl-client 2>/dev/null"
+            )
+            # Lines look like:
+            #   gl-client.aabbccddeeff.mac='aa:bb:cc:dd:ee:ff'
+            #   gl-client.aabbccddeeff.name='My Phone'
+            section_mac: dict[str, str] = {}  # section_id -> mac
+            section_name: dict[str, str] = {}  # section_id -> name
+            for line in raw.splitlines():
+                line = line.strip()
+                if not line or "=" not in line:
+                    continue
+                key, _, val = line.partition("=")
+                val = val.strip("'\"")
+                parts = key.split(".")
+                if len(parts) < 3:
+                    continue
+                # parts: ['gl-client', '<section>', '<option>']
+                sec_id = parts[1]
+                option = parts[2]
+                if option == "mac":
+                    section_mac[sec_id] = normalize_mac(val)
+                elif option == "alias" and val.strip():
+                    section_name[sec_id] = val.strip()
+
+            for sec_id, name in section_name.items():
+                mac = section_mac.get(sec_id)
+                if mac:
+                    aliases[mac] = name
+                else:
+                    # section name itself may be the MAC without colons
+                    with contextlib.suppress(Exception):
+                        aliases[sec_id] = name
+
+            if aliases:
+                _LOGGER.debug(
+                    "Loaded %d GL-iNet client aliases via SSH uci show",
+                    len(aliases),
                 )
-                # Lines look like:
-                #   gl-client.aabbccddeeff.mac='aa:bb:cc:dd:ee:ff'
-                #   gl-client.aabbccddeeff.name='My Phone'
-                section_mac: dict[str, str] = {}  # section_id -> mac
-                section_name: dict[str, str] = {}  # section_id -> name
-                for line in raw.splitlines():
-                    line = line.strip()
-                    if not line or "=" not in line:
-                        continue
-                    key, _, val = line.partition("=")
-                    val = val.strip("'\"")
-                    parts = key.split(".")
-                    if len(parts) < 3:
-                        continue
-                    # parts: ['gl-client', '<section>', '<option>']
-                    sec_id = parts[1]
-                    option = parts[2]
-                    if option == "mac":
-                        section_mac[sec_id] = normalize_mac(val)
-                    elif option == "alias" and val.strip():
-                        section_name[sec_id] = val.strip()
-
-                for sec_id, name in section_name.items():
-                    mac = section_mac.get(sec_id)
-                    if mac:
-                        aliases[mac] = name
-                    else:
-                        # section name itself may be the MAC without colons
-                        with contextlib.suppress(Exception):
-                            aliases[sec_id] = name
-
-                if aliases:
-                    _LOGGER.debug(
-                        "Loaded %d GL-iNet client aliases via SSH uci show",
-                        len(aliases),
-                    )
-            except Exception as err:
-                _LOGGER.debug("SSH uci show gl-client failed: %s", err)
+        except Exception as err:
+            _LOGGER.debug("SSH uci show gl-client failed: %s", err)
 
         return aliases
 
@@ -304,9 +302,9 @@ class OpenWrtManager:
                 client.is_online = True
                 client.is_wireless = True
                 # client.interface = wireless_client.replace("hostapd.", "")
-                client.signal_dbm = signal
-                client.rx_rate = rx
-                client.tx_rate = tx
+                client.signal_dbm = int(signal)
+                client.rx_rate = int(rx)
+                client.tx_rate = int(tx)
 
         except Exception as err:
             _LOGGER.warning("Could not fetch wireless station info: %s", err)
@@ -337,14 +335,14 @@ class OpenWrtManager:
         # 4. Check Firewall Block Status for each client
         try:
             rule = await self._async_get_or_create_firewall_rule()
-
-            for norm_mac, client in clients.items():
-                if norm_mac in rule.src_mac:
-                    client.internet_blocked = True
-                    client.firewall_rule_id = rule.name
-                else:
-                    client.internet_blocked = False
-                    client.firewall_rule_id = None
+            if rule is not None:
+                for norm_mac, client in clients.items():
+                    if norm_mac in rule.src_mac:
+                        client.internet_blocked = True
+                        client.firewall_rule_id = rule.name
+                    else:
+                        client.internet_blocked = False
+                        client.firewall_rule_id = None
         except Exception as err:
             _LOGGER.warning("Could not inspect firewall rules: %s", err)
 
@@ -402,7 +400,7 @@ class OpenWrtManager:
             src="lan",
             dest="wan",
             target="REJECT",
-            enabled="0",
+            enabled=False,
             src_mac=[],
         )
         rule_dict = rule.as_uci_value_dict()
@@ -452,9 +450,9 @@ class OpenWrtManager:
                 if name != self.firewall_rule_name:
                     continue
 
-                index = firewall_rule.get(".index")
-                src = firewall_rule.get("src")
-                dest = firewall_rule.get("dest")
+                index = int(firewall_rule.get(".index", ""))
+                src = firewall_rule.get("src", "")
+                dest = firewall_rule.get("dest", "")
                 target = firewall_rule.get("target", "").upper()
                 enabled = str(firewall_rule.get("enabled", "1")) == "1"
                 src_mac = firewall_rule.get("src_mac") or []
