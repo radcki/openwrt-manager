@@ -1,23 +1,4 @@
 {
   "version": "0.2.0",
-  "configurations": [
-    {
-      "name": "Python: Run Tests (pytest)",
-      "type": "debugpy",
-      "request": "launch",
-      "module": "pytest",
-      "args": ["tests", "-v"],
-      "console": "integratedTerminal",
-      "justMyCode": true
-    },
-    {
-      "name": "Python: Run Mock OpenWrt Server",
-      "type": "debugpy",
-      "request": "launch",
-      "program": "${workspaceFolder}/scripts/mock_openwrt_server.py",
-      "args": ["--port", "8080"],
-      "console": "integratedTerminal",
-      "justMyCode": true
-    }
-  ]
+  "configurations": []
 }

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from typing import Any
 
 import voluptuous as vol
@@ -22,6 +23,7 @@ from .const import (
     ACTION_REJECT,
     CONF_FIREWALL_ACTION,
     CONF_FIREWALL_RULE_NAME,
+    CONF_HOST_KEY,
     DEFAULT_FIREWALL_ACTION,
     DEFAULT_FIREWALL_RULE_NAME,
     DEFAULT_PORT_SSH,
@@ -30,7 +32,6 @@ from .const import (
 )
 from .openwrt_client.openwrt_client import (
     CannotConnect,
-    EndpointNotUbus,
     InvalidAuth,
     OpenWrtClient,
 )
@@ -83,8 +84,6 @@ class OpenWrtConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: igno
             try:
                 await openwrt_client.async_login()
                 router_info = await openwrt_manager.async_get_router_info()
-            except EndpointNotUbus:
-                errors["base"] = "ubus_not_found"
             except CannotConnect:
                 errors["base"] = "cannot_connect"
             except InvalidAuth:
@@ -96,6 +95,7 @@ class OpenWrtConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: igno
                 await openwrt_client.close()
 
             if not errors:
+                user_input[CONF_HOST_KEY] = openwrt_client.host_key
                 unique_id = (
                     router_info.mac
                     if router_info.mac != "00:00:00:00:00:00"
@@ -141,15 +141,51 @@ class OpenWrtConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: igno
         config_entry: config_entries.ConfigEntry,
     ) -> OpenWrtOptionsFlow:
         """Return the options flow handler."""
-        return OpenWrtOptionsFlow(config_entry)
+        return OpenWrtOptionsFlow()
+
+    async def async_step_reauth(self, entry_data: Mapping[str, Any]) -> FlowResult:
+        """Start re-authentication after credentials were rejected."""
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Ask for a new password."""
+        errors: dict[str, str] = {}
+        entry = self._get_reauth_entry()
+
+        if user_input is not None:
+            client = OpenWrtClient(
+                host=entry.data[CONF_HOST],
+                port=entry.data.get(CONF_PORT, DEFAULT_PORT_SSH),
+                username=entry.data.get(CONF_USERNAME, "root"),
+                password=user_input[CONF_PASSWORD],
+                host_key=entry.data.get(CONF_HOST_KEY),
+            )
+            try:
+                await client.async_login()
+            except InvalidAuth:
+                errors["base"] = "invalid_auth"
+            except CannotConnect:
+                errors["base"] = "cannot_connect"
+            finally:
+                await client.close()
+
+            if not errors:
+                return self.async_update_reload_and_abort(
+                    entry,
+                    data_updates={CONF_PASSWORD: user_input[CONF_PASSWORD]},
+                )
+
+        return self.async_show_form(
+            step_id="reauth_confirm",
+            data_schema=vol.Schema({vol.Required(CONF_PASSWORD): str}),
+            errors=errors,
+        )
 
 
 class OpenWrtOptionsFlow(config_entries.OptionsFlow):
     """Handle OpenWrt options."""
-
-    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
-        """Initialize options flow."""
-        self.config_entry = config_entry
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None

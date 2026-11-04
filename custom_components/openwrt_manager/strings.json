@@ -13,6 +13,13 @@
           "firewall_rule_name": "Firewall Managed Rule Name",
           "scan_interval": "Scan Interval (seconds)"
         }
+      },
+      "reauth_confirm": {
+        "title": "Re-authenticate OpenWrt Router",
+        "description": "The router rejected the stored credentials. Enter the new password.",
+        "data": {
+          "password": "Password"
+        }
       }
     },
     "error": {
@@ -21,7 +28,8 @@
       "unknown": "Unexpected error occurred."
     },
     "abort": {
-      "already_configured": "This OpenWrt router is already configured."
+      "already_configured": "This OpenWrt router is already configured.",
+      "reauth_successful": "Re-authentication was successful."
     }
   },
   "options": {

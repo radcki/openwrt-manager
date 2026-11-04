@@ -1,16 +1,23 @@
 from __future__ import annotations
 
-import contextlib
 import logging
 import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from openwrt_manager.openwrt_client import OpenWrtClient
-
-PROTOCOL_SSH = "ssh"
+from .openwrt_client import OpenWrtClient, OpenWrtClientError
 
 _LOGGER = logging.getLogger(__name__)
+
+WIRELESS_CLIENTS_CMD = (
+    'iwinfo | grep "ESSID:" | cut -d" " -f1 | while read iface; do '
+    "iwinfo \"$iface\" assoclist | xargs | sed 's/..:..:..:..:..:../\\n&/g' | "
+    'grep -E "^([[:xdigit:]]{2}:){5}[[:xdigit:]]{2}"; done'
+)
+WIRELESS_CLIENT_PATTERN = re.compile(
+    r"([0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5})\s+(-?\d+)\s+dBm"
+    r".*?RX:\s+([\d.]+)\s+MBit/s.*?TX:\s+([\d.]+)\s+MBit/s"
+)
 
 
 @dataclass
@@ -68,7 +75,7 @@ class ClientDevice:
 
 
 def normalize_mac(mac: str) -> str:
-    """Normalize MAC address to lowercase colon-separated format."""
+    """Normalize MAC address to uppercase colon-separated format."""
     clean = re.sub(r"[^0-9a-fA-F]", "", mac).upper()
     return ":".join(clean[i : i + 2] for i in range(0, 12, 2))
 
@@ -78,8 +85,37 @@ def sanitize_rule_name(mac: str) -> str:
     return f"ha_block_{re.sub(r'[^0-9a-zA-Z]', '_', mac).lower()}"
 
 
+def parse_wireless_clients(raw: str) -> list[tuple[str, int, int, int]]:
+    """Parse association lines into (mac, signal_dbm, rx_mbit, tx_mbit) tuples."""
+    result = []
+    for line in raw.splitlines():
+        match = WIRELESS_CLIENT_PATTERN.match(line)
+        if not match:
+            continue
+        mac, signal, rx, tx = match.groups()
+        result.append((mac, int(signal), int(float(rx)), int(float(tx))))
+    return result
+
+
+def parse_arp_table(raw: str) -> list[dict[str, str]]:
+    """Parse the contents of /proc/net/arp."""
+    entries: list[dict[str, str]] = []
+    for line in raw.splitlines()[1:]:
+        parts = line.split()
+        if len(parts) >= 6:
+            entries.append(
+                {
+                    "ip": parts[0],
+                    "flags": parts[2],
+                    "mac": parts[3],
+                    "device": parts[5],
+                }
+            )
+    return entries
+
+
 class OpenWrtManager:
-    """Asynchronous client for interacting with OpenWrt."""
+    """High-level operations on an OpenWrt router."""
 
     def __init__(
         self,
@@ -87,7 +123,7 @@ class OpenWrtManager:
         firewall_rule_name: str,
         firewall_action: str = "REJECT",
     ) -> None:
-        """Initialize the OpenWrt client."""
+        """Initialize the manager."""
         self.openwrt_client = openwrt_client
         self.firewall_action = firewall_action
         self.firewall_rule_name = firewall_rule_name
@@ -95,60 +131,42 @@ class OpenWrtManager:
     async def async_get_router_info(self) -> RouterInfo:
         """Retrieve router model, hostname, release version, and primary MAC."""
         info = RouterInfo()
-        try:
-            board = await self.openwrt_client.async_ubus_call("system", "board")
-            if isinstance(board, dict):
-                info.hostname = board.get("hostname", "OpenWrt")
-                model_info = board.get("model", {})
-                info.model = (
-                    model_info.get("name", "OpenWrt Device")
-                    if isinstance(model_info, dict)
-                    else str(model_info or "OpenWrt Device")
-                )
-                release_info = board.get("release", {})
-                info.release = (
-                    release_info.get("description", "OpenWrt")
-                    if isinstance(release_info, dict)
-                    else str(release_info or "OpenWrt")
-                )
-        except Exception as err:
-            _LOGGER.warning("Could not fetch system.board info: %s", err)
+        board = await self.openwrt_client.async_ubus_call("system", "board")
+        if isinstance(board, dict):
+            info.hostname = board.get("hostname", "OpenWrt")
+            model_info = board.get("model", {})
+            info.model = (
+                model_info.get("name", "OpenWrt Device")
+                if isinstance(model_info, dict)
+                else str(model_info or "OpenWrt Device")
+            )
+            release_info = board.get("release", {})
+            info.release = (
+                release_info.get("description", "OpenWrt")
+                if isinstance(release_info, dict)
+                else str(release_info or "OpenWrt")
+            )
 
-        try:
-            sys_info = await self.openwrt_client.async_ubus_call("system", "info")
-            if isinstance(sys_info, dict):
-                info.uptime = sys_info.get("uptime", 0)
-        except Exception as err:
-            _LOGGER.warning("Could not fetch system.info: %s", err)
+        sys_info = await self.openwrt_client.async_ubus_call("system", "info")
+        if isinstance(sys_info, dict):
+            info.uptime = sys_info.get("uptime", 0)
 
         # Get LAN MAC address for router unique identifier
-        try:
+        for iface in ("br-lan", "eth0", "lan", "eth1"):
             net_status = await self.openwrt_client.async_ubus_call(
-                "network.device", "status", {"name": "br-lan"}
+                "network.device", "status", {"name": iface}
             )
             if isinstance(net_status, dict) and "macaddr" in net_status:
                 info.mac = normalize_mac(net_status["macaddr"])
-            else:
-                for iface in ("eth0", "lan", "eth1"):
-                    fallback = await self.openwrt_client.async_ubus_call(
-                        "network.device", "status", {"name": iface}
-                    )
-                    if isinstance(fallback, dict) and "macaddr" in fallback:
-                        info.mac = normalize_mac(fallback["macaddr"])
-                        break
-        except Exception:
-            _LOGGER.debug("Using fallback MAC address for OpenWrt router")
+                break
 
         # fallback for primary MAC if network.device status did not return it
         if info.mac == "00:00:00:00:00:00":
-            try:
-                mac_out = await self.openwrt_client.async_run_ssh_command(
-                    "cat /sys/class/net/br-lan/address 2>/dev/null || cat /sys/class/net/eth0/address 2>/dev/null"
-                )
-                if mac_out.strip():
-                    info.mac = normalize_mac(mac_out.strip())
-            except Exception:
-                pass
+            mac_out = await self.openwrt_client.async_run_ssh_command(
+                "cat /sys/class/net/br-lan/address 2>/dev/null || cat /sys/class/net/eth0/address 2>/dev/null"
+            )
+            if mac_out.strip():
+                info.mac = normalize_mac(mac_out.strip())
 
         return info
 
@@ -159,7 +177,7 @@ class OpenWrtManager:
         Each section looks like:
             config client 'aabbccddeeff'
                 option mac 'aa:bb:cc:dd:ee:ff'
-                option name 'My Phone'
+                option alias 'My Phone'
 
         Returns a dict mapping normalized MAC -> alias name.
         """
@@ -170,7 +188,7 @@ class OpenWrtManager:
                 "uci", "get", {"config": "gl-client"}
             )
             if isinstance(gl_config, dict) and "values" in gl_config:
-                for _sec, sec_val in gl_config["values"].items():
+                for sec_val in gl_config["values"].values():
                     if not isinstance(sec_val, dict):
                         continue
                     mac = sec_val.get("mac")
@@ -182,7 +200,7 @@ class OpenWrtManager:
                         "Loaded %d GL-iNet client aliases via uci.get", len(aliases)
                     )
                     return aliases
-        except Exception as err:
+        except OpenWrtClientError as err:
             _LOGGER.debug("uci.get gl-client failed: %s", err)
 
         # SSH fallback: parse `uci show gl-client` output
@@ -192,9 +210,9 @@ class OpenWrtManager:
             )
             # Lines look like:
             #   gl-client.aabbccddeeff.mac='aa:bb:cc:dd:ee:ff'
-            #   gl-client.aabbccddeeff.name='My Phone'
-            section_mac: dict[str, str] = {}  # section_id -> mac
-            section_name: dict[str, str] = {}  # section_id -> name
+            #   gl-client.aabbccddeeff.alias='My Phone'
+            section_mac: dict[str, str] = {}
+            section_name: dict[str, str] = {}
             for line in raw.splitlines():
                 line = line.strip()
                 if not line or "=" not in line:
@@ -204,7 +222,6 @@ class OpenWrtManager:
                 parts = key.split(".")
                 if len(parts) < 3:
                     continue
-                # parts: ['gl-client', '<section>', '<option>']
                 sec_id = parts[1]
                 option = parts[2]
                 if option == "mac":
@@ -216,17 +233,16 @@ class OpenWrtManager:
                 mac = section_mac.get(sec_id)
                 if mac:
                     aliases[mac] = name
-                else:
+                elif re.fullmatch(r"[0-9a-fA-F]{12}", sec_id):
                     # section name itself may be the MAC without colons
-                    with contextlib.suppress(Exception):
-                        aliases[sec_id] = name
+                    aliases[normalize_mac(sec_id)] = name
 
             if aliases:
                 _LOGGER.debug(
                     "Loaded %d GL-iNet client aliases via SSH uci show",
                     len(aliases),
                 )
-        except Exception as err:
+        except OpenWrtClientError as err:
             _LOGGER.debug("SSH uci show gl-client failed: %s", err)
 
         return aliases
@@ -235,162 +251,69 @@ class OpenWrtManager:
         """Fetch all connected clients from DHCP leases, wireless stations, and ARP."""
         clients: dict[str, ClientDevice] = {}
 
-        # 1. Fetch DHCP Leases via ubus
-        try:
-            leases_resp = await self.openwrt_client.async_ubus_call(
-                "luci-rpc", "getDHCPLeases"
-            )
-            if isinstance(leases_resp, dict):
-                for lease in leases_resp.get("dhcp_leases", []):
-                    mac = lease.get("macaddr")
-                    if not mac:
-                        continue
-                    norm_mac = normalize_mac(mac)
-                    clients[norm_mac] = ClientDevice(
-                        mac=norm_mac,
-                        ip=lease.get("ipaddr"),
-                        hostname=lease.get("hostname")
-                        or f"Client-{norm_mac[-5:].replace(':', '')}",
-                        is_online=False,
-                    )
-        except Exception as err:
-            _LOGGER.warning("Could not fetch DHCP leases from OpenWrt ubus: %s", err)
-
-        # 1b. SSH Fallback: Read /tmp/dhcp.leases directly if luci-rpc was not available
-        # if self.protocol == PROTOCOL_SSH:
-        #     try:
-        #         raw_leases = await self.async_run_ssh_command(
-        #             "cat /tmp/dhcp.leases 2>/dev/null"
-        #         )
-        #         for line in raw_leases.splitlines():
-        #             parts = line.split()
-        #             if len(parts) >= 4:
-        #                 mac, ip, hostname = parts[1], parts[2], parts[3]
-        #                 norm_mac = normalize_mac(mac)
-        #                 if norm_mac not in clients:
-        #                     clients[norm_mac] = ClientDevice(
-        #                         mac=norm_mac,
-        #                         ip=ip,
-        #                         hostname=hostname
-        #                         if hostname != "*"
-        #                         else f"Client-{norm_mac[-5:].replace(':', '')}",
-        #                         is_online=False,
-        #                     )
-        #                 elif not clients[norm_mac].ip:
-        #                     clients[norm_mac].ip = ip
-        #     except Exception as err:
-        #         _LOGGER.debug("Could not read /tmp/dhcp.leases via SSH: %s", err)
-
-        # 2. Fetch Wireless Station Clients
-        try:
-            wireless_clients_cmd = 'iwinfo | grep "ESSID:" | cut -d" " -f1 | while read iface; do iwinfo "$iface" assoclist | xargs | sed \'s/..:..:..:..:..:../\\n&/g\' | grep -E "^([[:xdigit:]]{2}:){5}[[:xdigit:]]{2}"; done'
-            wireless_clients = await self.openwrt_client.async_run_ssh_command(
-                wireless_clients_cmd
-            )
-            parse_pattern = r"([0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5})\s+(-?\d+)\s+dBm.*?RX:\s+([\d.]+)\s+MBit/s.*?TX:\s+([\d.]+)\s+MBit/s"
-            for wireless_client in wireless_clients.splitlines():
-                match = re.match(parse_pattern, wireless_client)
-                if not match:
-                    continue
-                mac, signal, rx, tx = match.groups()
-                norm_mac = normalize_mac(mac)
-                if norm_mac not in clients:
-                    clients[norm_mac] = ClientDevice(mac=norm_mac)
-
-                client = clients[norm_mac]
-
-                client.is_online = True
-                client.is_wireless = True
-                # client.interface = wireless_client.replace("hostapd.", "")
-                client.signal_dbm = int(signal)
-                client.rx_rate = int(rx)
-                client.tx_rate = int(tx)
-
-        except Exception as err:
-            _LOGGER.warning("Could not fetch wireless station info: %s", err)
-
-        # 3. Fetch ARP Table (marks active clients as online)
-        try:
-            arp_data = await self._async_get_arp_table()
-            for entry in arp_data:
-                mac = entry.get("mac")
+        # 1. DHCP leases
+        leases_resp = await self.openwrt_client.async_ubus_call(
+            "luci-rpc", "getDHCPLeases"
+        )
+        if isinstance(leases_resp, dict):
+            for lease in leases_resp.get("dhcp_leases", []):
+                mac = lease.get("macaddr")
                 if not mac:
                     continue
                 norm_mac = normalize_mac(mac)
-                if norm_mac not in clients:
-                    clients[norm_mac] = ClientDevice(
-                        mac=norm_mac,
-                        ip=entry.get("ip"),
-                        is_online=True,
-                    )
-                else:
-                    client = clients[norm_mac]
-                    if not client.ip and entry.get("ip"):
-                        client.ip = entry.get("ip")
-                    if entry.get("flags") != "0x0":
-                        client.is_online = True
-        except Exception as err:
-            _LOGGER.debug("Could not parse ARP cache: %s", err)
+                clients[norm_mac] = ClientDevice(
+                    mac=norm_mac,
+                    ip=lease.get("ipaddr"),
+                    hostname=lease.get("hostname")
+                    or f"Client-{norm_mac[-5:].replace(':', '')}",
+                    is_online=False,
+                )
 
-        # 4. Check Firewall Block Status for each client
-        try:
-            rule = await self._async_get_or_create_firewall_rule()
-            if rule is not None:
-                for norm_mac, client in clients.items():
-                    if norm_mac in rule.src_mac:
-                        client.internet_blocked = True
-                        client.firewall_rule_id = rule.name
-                    else:
-                        client.internet_blocked = False
-                        client.firewall_rule_id = None
-        except Exception as err:
-            _LOGGER.warning("Could not inspect firewall rules: %s", err)
+        # 2. Wireless stations
+        wireless_raw = await self.openwrt_client.async_run_ssh_command(
+            WIRELESS_CLIENTS_CMD
+        )
+        for mac, signal, rx, tx in parse_wireless_clients(wireless_raw):
+            norm_mac = normalize_mac(mac)
+            client = clients.setdefault(norm_mac, ClientDevice(mac=norm_mac))
+            client.is_online = True
+            client.is_wireless = True
+            client.signal_dbm = signal
+            client.rx_rate = rx
+            client.tx_rate = tx
 
-        # 5. Overlay GL-iNet user-assigned aliases as device names
-        try:
-            aliases = await self.async_get_glinet_aliases()
-            for norm_mac, alias in aliases.items():
-                if norm_mac in clients:
-                    clients[norm_mac].alias = alias
-        except Exception as err:
-            _LOGGER.debug("Could not fetch GL-iNet aliases: %s", err)
+        # 3. ARP table (marks active clients as online)
+        arp_raw = await self.openwrt_client.async_run_ssh_command(
+            "cat /proc/net/arp 2>/dev/null"
+        )
+        for entry in parse_arp_table(arp_raw):
+            norm_mac = normalize_mac(entry["mac"])
+            if norm_mac == "00:00:00:00:00:00":
+                continue
+            existing = clients.get(norm_mac)
+            if existing is None:
+                clients[norm_mac] = ClientDevice(
+                    mac=norm_mac, ip=entry["ip"], is_online=True
+                )
+                continue
+            if not existing.ip:
+                existing.ip = entry["ip"]
+            if entry["flags"] != "0x0":
+                existing.is_online = True
+
+        # 4. Firewall block status
+        rule = await self._async_get_or_create_firewall_rule()
+        for norm_mac, client in clients.items():
+            blocked = rule is not None and norm_mac in rule.src_mac
+            client.internet_blocked = blocked
+            client.firewall_rule_id = rule.name if blocked and rule else None
+
+        # 5. GL-iNet user-assigned aliases
+        for norm_mac, alias in (await self.async_get_glinet_aliases()).items():
+            if norm_mac in clients:
+                clients[norm_mac].alias = alias
 
         return clients
-
-    async def _async_get_arp_table(self) -> list[dict[str, str]]:
-        """Read /proc/net/arp using SSH or ubus file read."""
-        entries: list[dict[str, str]] = []
-        raw_text: str | None = None
-
-        # if self.protocol == PROTOCOL_SSH:
-        #     with contextlib.suppress(Exception):
-        #         raw_text = await self.openwrt_client.async_run_ssh_command(
-        #             "cat /proc/net/arp 2>/dev/null"
-        #         )
-        # else:
-        try:
-            file_resp = await self.openwrt_client.async_ubus_call(
-                "file", "read", {"path": "/proc/net/arp"}
-            )
-            if isinstance(file_resp, dict) and "data" in file_resp:
-                raw_text = file_resp["data"]
-        except Exception:
-            pass
-
-        if raw_text:
-            lines = raw_text.splitlines()
-            for line in lines[1:]:
-                parts = line.split()
-                if len(parts) >= 6:
-                    entries.append(
-                        {
-                            "ip": parts[0],
-                            "flags": parts[2],
-                            "mac": parts[3],
-                            "device": parts[5],
-                        }
-                    )
-        return entries
 
     async def _async_add_firewall_rule(self) -> None:
         rule = FirewallRule(
@@ -399,11 +322,10 @@ class OpenWrtManager:
             name=self.firewall_rule_name,
             src="lan",
             dest="wan",
-            target="REJECT",
+            target=self.firewall_action,
             enabled=False,
             src_mac=[],
         )
-        rule_dict = rule.as_uci_value_dict()
         await self.openwrt_client.async_ubus_call(
             "uci",
             "add",
@@ -411,7 +333,7 @@ class OpenWrtManager:
                 "config": "firewall",
                 "name": self.firewall_rule_name,
                 "type": "rule",
-                "values": rule_dict,
+                "values": rule.as_uci_value_dict(),
             },
         )
         await self._async_commit_and_reload_firewall()
@@ -432,49 +354,38 @@ class OpenWrtManager:
         return rule
 
     async def _async_get_firewall_rule(self) -> FirewallRule | None:
-        try:
-            fw_config = await self.openwrt_client.async_ubus_call(
-                "uci", "get", {"config": "firewall"}
+        fw_config = await self.openwrt_client.async_ubus_call(
+            "uci", "get", {"config": "firewall"}
+        )
+        if not isinstance(fw_config, dict) or "values" not in fw_config:
+            return None
+
+        for key, firewall_rule in fw_config["values"].items():
+            if not isinstance(firewall_rule, dict):
+                continue
+            if firewall_rule.get(".type") != "rule":
+                continue
+            name = firewall_rule.get("name")
+            if name != self.firewall_rule_name:
+                continue
+
+            src_mac = firewall_rule.get("src_mac") or []
+            if isinstance(src_mac, str):
+                src_mac = [src_mac]
+            return FirewallRule(
+                index=int(firewall_rule.get(".index", 0)),
+                id=key,
+                name=name,
+                src=firewall_rule.get("src", ""),
+                dest=firewall_rule.get("dest", ""),
+                target=firewall_rule.get("target", "").upper(),
+                enabled=str(firewall_rule.get("enabled", "1")) == "1",
+                src_mac=[normalize_mac(mac) for mac in src_mac],
             )
-            if not isinstance(fw_config, dict) or "values" not in fw_config:
-                return None
-
-            sections = fw_config["values"]
-            for key, firewall_rule in sections.items():
-                if not isinstance(firewall_rule, dict):
-                    continue
-                if firewall_rule.get(".type") != "rule":
-                    continue
-                name = firewall_rule.get("name")
-
-                if name != self.firewall_rule_name:
-                    continue
-
-                index = int(firewall_rule.get(".index", ""))
-                src = firewall_rule.get("src", "")
-                dest = firewall_rule.get("dest", "")
-                target = firewall_rule.get("target", "").upper()
-                enabled = str(firewall_rule.get("enabled", "1")) == "1"
-                src_mac = firewall_rule.get("src_mac") or []
-                if isinstance(src_mac, str):
-                    src_mac = [src_mac]
-                return FirewallRule(
-                    index=index,
-                    id=key,
-                    name=name,
-                    src=src,
-                    dest=dest,
-                    target=target,
-                    enabled=enabled,
-                    src_mac=src_mac,
-                )
-        except Exception as err:
-            _LOGGER.warning("Failed to retrieve UCI firewall config: %s", err)
         return None
 
     async def async_block_client(self, mac: str) -> None:
         """Block internet access for a device by modifying OpenWrt firewall rules."""
-
         norm_mac = normalize_mac(mac)
         _LOGGER.info("Blocking internet access for client %s", norm_mac)
         current_rule = await self._async_get_or_create_firewall_rule()
@@ -486,11 +397,10 @@ class OpenWrtManager:
             return
 
         current_rule.src_mac.append(norm_mac)
-
         await self._async_save_rule(current_rule)
 
     async def async_unblock_client(self, mac: str) -> None:
-        """Unblock internet access for a device by disabling or removing its firewall rule."""
+        """Unblock internet access for a device by removing it from the rule."""
         norm_mac = normalize_mac(mac)
         _LOGGER.info("Unblocking internet access for client %s", norm_mac)
 
@@ -499,16 +409,13 @@ class OpenWrtManager:
             _LOGGER.warning("Rule %s not found", self.firewall_rule_name)
             return
         if norm_mac not in current_rule.src_mac:
-            _LOGGER.info(
-                "Client %s (%s) was already not in rule, doing nothing", norm_mac
-            )
+            _LOGGER.info("Client %s was already not in rule, doing nothing", norm_mac)
             return
 
         current_rule.src_mac.remove(norm_mac)
         await self._async_save_rule(current_rule)
 
     async def _async_save_rule(self, rule: FirewallRule) -> None:
-        rule_dict = rule.as_uci_value_dict()
         await self.openwrt_client.async_ubus_call(
             "uci",
             "set",
@@ -516,17 +423,13 @@ class OpenWrtManager:
                 "config": "firewall",
                 "section": rule.id,
                 "type": "rule",
-                "values": rule_dict,
+                "values": rule.as_uci_value_dict(),
             },
         )
         await self._async_commit_and_reload_firewall()
 
     async def _async_commit_and_reload_firewall(self) -> None:
         """Commit UCI changes and reload the OpenWrt firewall."""
-        try:
-            await self.openwrt_client.async_run_ssh_command(
-                "uci commit firewall && /etc/init.d/firewall reload"
-            )
-            return
-        except Exception as err:
-            _LOGGER.error(f"Failed to commit/reload firewall via SSH: {err}")
+        await self.openwrt_client.async_run_ssh_command(
+            "uci commit firewall && /etc/init.d/firewall reload"
+        )

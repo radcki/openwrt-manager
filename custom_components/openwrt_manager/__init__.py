@@ -14,11 +14,13 @@ from homeassistant.const import (
     CONF_USERNAME,
 )
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
 
 from .const import (
     CONF_FIREWALL_ACTION,
     CONF_FIREWALL_RULE_NAME,
+    CONF_HOST_KEY,
     DEFAULT_FIREWALL_ACTION,
     DEFAULT_FIREWALL_RULE_NAME,
     DEFAULT_PORT_SSH,
@@ -27,7 +29,11 @@ from .const import (
     PLATFORMS,
 )
 from .coordinator import OpenWrtDataUpdateCoordinator
-from .openwrt_client.openwrt_client import OpenWrtClient
+from .openwrt_client.openwrt_client import (
+    InvalidAuth,
+    OpenWrtClient,
+    OpenWrtClientError,
+)
 from .openwrt_client.openwrt_manager import OpenWrtManager
 
 _LOGGER = logging.getLogger(__name__)
@@ -55,7 +61,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
 
     openwrt_client = OpenWrtClient(
-        host=host, port=port, username=username, password=password
+        host_key=entry.data.get(CONF_HOST_KEY),
+        host=host,
+        port=port,
+        username=username,
+        password=password,
     )
 
     openwrt_manager = OpenWrtManager(
@@ -72,7 +82,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
 
     # Fetch router details and register router device in registry
-    router_info = await openwrt_manager.async_get_router_info()
+    try:
+        router_info = await openwrt_manager.async_get_router_info()
+    except InvalidAuth as err:
+        await openwrt_client.close()
+        raise ConfigEntryAuthFailed(str(err)) from err
+    except OpenWrtClientError as err:
+        await openwrt_client.close()
+        raise ConfigEntryNotReady(str(err)) from err
+
+    # Pin the host key learned on first use for entries created before pinning existed
+    if openwrt_client.host_key and entry.data.get(CONF_HOST_KEY) is None:
+        hass.config_entries.async_update_entry(
+            entry, data={**entry.data, CONF_HOST_KEY: openwrt_client.host_key}
+        )
     coordinator.router_info = router_info
 
     device_registry = dr.async_get(hass)

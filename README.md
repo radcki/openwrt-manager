@@ -30,8 +30,10 @@ I wanted to easily block and unblock individual IoT devices from internet access
 
 ## Prerequisites on OpenWrt
 
-1. Configure SSH key or password authentication on port 22.
-2. The user must have permissions to execute `uci`, `ubus`, and `/etc/init.d/firewall reload`.
+1. Enable SSH with password authentication (default port 22). The user must be allowed to run `uci`, `ubus` and `/etc/init.d/firewall reload` (normally `root`).
+2. Install via HACS (custom repository, category _Integration_), restart Home Assistant, then add **OpenWrt Manager** under _Settings → Devices & services_.
+
+> **Security:** the router's SSH host key is trusted on first connection and pinned in the config entry. If the key later changes (e.g. after a firmware reset), the integration refuses to connect; remove and re-add the integration to pin the new key.
 
 > **Notice!** Firewall rule will stay on router after you stop using integration - **you will need to remove it manually**.
 
@@ -45,7 +47,7 @@ I wanted to easily block and unblock individual IoT devices from internet access
 uv sync --all-extras
 ```
 
-### 2. Linting & Formatting
+### 2. Linting, Formatting & Tests
 
 ```bash
 # Run ruff check
@@ -56,6 +58,9 @@ uv run ruff format --check .
 
 # Run type checks
 uv run mypy custom_components/openwrt_manager
+
+# Run tests
+uv run pytest
 ```
 
 ### 3. Running Home Assistant via Docker Dev Environment

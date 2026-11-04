@@ -7,10 +7,12 @@ from datetime import timedelta
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import DOMAIN
+from .openwrt_client.openwrt_client import OpenWrtClientError
 from .openwrt_client.openwrt_manager import ClientDevice, OpenWrtManager, RouterInfo
 
 _LOGGER = logging.getLogger(__name__)
@@ -45,7 +47,7 @@ class OpenWrtDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ClientDevice]
         """Fetch latest client data and firewall states from OpenWrt."""
         try:
             clients = await self.openwrt_manager.async_get_clients()
-        except Exception as err:
+        except OpenWrtClientError as err:
             raise UpdateFailed(
                 f"Error communicating with OpenWrt router: {err}"
             ) from err
@@ -65,10 +67,16 @@ class OpenWrtDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ClientDevice]
 
     async def async_block_client(self, mac: str) -> None:
         """Block internet access for a client device and refresh data."""
-        await self.openwrt_manager.async_block_client(mac)
+        try:
+            await self.openwrt_manager.async_block_client(mac)
+        except OpenWrtClientError as err:
+            raise HomeAssistantError(f"Failed to block {mac}: {err}") from err
         await self.async_request_refresh()
 
     async def async_unblock_client(self, mac: str) -> None:
         """Restore internet access for a client device and refresh data."""
-        await self.openwrt_manager.async_unblock_client(mac)
+        try:
+            await self.openwrt_manager.async_unblock_client(mac)
+        except OpenWrtClientError as err:
+            raise HomeAssistantError(f"Failed to unblock {mac}: {err}") from err
         await self.async_request_refresh()

@@ -24,22 +24,6 @@
       "problemMatcher": ["$mypy"]
     },
     {
-      "label": "Run Tests",
-      "type": "shell",
-      "command": "uv run pytest",
-      "group": {
-        "kind": "test",
-        "isDefault": true
-      }
-    },
-    {
-      "label": "Start Mock OpenWrt Server",
-      "type": "shell",
-      "command": "uv run python scripts/mock_openwrt_server.py --port 8080",
-      "isBackground": true,
-      "problemMatcher": []
-    },
-    {
       "label": "Start Home Assistant Docker",
       "type": "shell",
       "command": "docker compose up -d",
