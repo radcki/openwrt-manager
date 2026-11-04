@@ -20,7 +20,7 @@
     {
       "label": "Type check with mypy",
       "type": "shell",
-      "command": "uv run mypy custom_components/openwrt_router",
+      "command": "uv run mypy custom_components/openwrt-manager",
       "problemMatcher": ["$mypy"]
     },
     {

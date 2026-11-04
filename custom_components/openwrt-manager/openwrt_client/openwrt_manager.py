@@ -6,7 +6,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from custom_components.openwrt_router.openwrt_client.OpenWrtClient import OpenWrtClient
+from custom_components.openwrt-manager.openwrt_client.OpenWrtClient import \
+    OpenWrtClient
 
 PROTOCOL_SSH = "ssh"
 

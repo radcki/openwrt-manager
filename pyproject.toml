@@ -3,14 +3,14 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "ha-openwrt-router"
+name = "openwrt-manager"
 version = "0.1.0"
 description = "Home Assistant custom integration for OpenWrt router client tracking and firewall access control"
 readme = "README.md"
 requires-python = ">=3.12"
-license = { text = "Apache-2.0" }
+license = { text = "MIT" }
 authors = [
-    { name = "Community Developer" }
+    { name = "Radosław Adamczewski" }
 ]
 dependencies = [
     "aiohttp>=3.9.0",
@@ -20,16 +20,9 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.0.0",
-    "pytest-asyncio>=0.23.0",
-    "pytest-mock>=3.12.0",
-    "pytest-cov>=5.0.0",
     "ruff>=0.8.0",
     "mypy>=1.10.0",
     "aioresponses>=0.7.6",
-]
-ha-test = [
-    "pytest-homeassistant-custom-component>=0.13.0",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -56,7 +49,7 @@ ignore = [
 
 [tool.ruff.lint.isort]
 combine-as-imports = true
-known-first-party = ["custom_components.openwrt_router"]
+known-first-party = ["custom_components.openwrt-manager"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -2,7 +2,7 @@
 
 from homeassistant.const import Platform
 
-DOMAIN = "openwrt_router"
+DOMAIN = "openwrt-manager"
 DEFAULT_NAME = "OpenWrt Router"
 
 # Protocols

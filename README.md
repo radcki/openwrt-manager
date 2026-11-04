@@ -24,6 +24,7 @@ A custom Home Assistant integration that connects to an **OpenWrt router** via `
 ## Prerequisites on OpenWrt
 
 ### Option A: ubus JSON-RPC (Recommended)
+
 1. Ensure `rpcd` and `uhttpd-mod-ubus` are installed (default in modern OpenWrt installations):
    ```sh
    opkg update
@@ -34,6 +35,7 @@ A custom Home Assistant integration that connects to an **OpenWrt router** via `
 2. Verify access to `/ubus` endpoint using an administrative user or configure dedicated RPC ACLs in `/usr/share/rpcd/acl.d/`.
 
 ### Option B: SSH
+
 1. Configure SSH key or password authentication on port 22.
 2. The user must have permissions to execute `uci`, `ubus`, and `/etc/init.d/firewall reload`.
 
@@ -42,6 +44,7 @@ A custom Home Assistant integration that connects to an **OpenWrt router** via `
 ## Development & Local Testing
 
 ### 1. Environment Setup with `uv`
+
 ```powershell
 # Create virtual environment
 uv venv --python 3.13
@@ -51,6 +54,7 @@ uv pip install -e ".[dev]"
 ```
 
 ### 2. Linting & Formatting
+
 ```powershell
 # Run ruff check
 uv run ruff check .
@@ -59,24 +63,29 @@ uv run ruff check .
 uv run ruff format --check .
 
 # Run type checks
-uv run mypy custom_components/openwrt_router
+uv run mypy custom_components/openwrt-manager
 ```
 
 ### 3. Running Unit Tests
+
 ```powershell
 uv run pytest
 ```
 
 ### 4. Running Local Mock OpenWrt Server
+
 A mock server simulating OpenWrt ubus JSON-RPC is included in `scripts/mock_openwrt_server.py`:
+
 ```powershell
 uv run python scripts/mock_openwrt_server.py --port 8080
 ```
 
 ### 5. Running Home Assistant via Docker Dev Environment
+
 ```powershell
 docker compose up -d
 ```
+
 Access Home Assistant at `http://localhost:8123`.
 
 ---
@@ -88,15 +97,15 @@ graph TD
     HA[Home Assistant Core] <--> Coordinator[OpenWrt DataUpdateCoordinator]
     Coordinator <--> Client[OpenWrtApiClient]
     Client <-->|ubus JSON-RPC or SSH| OpenWrt[OpenWrt Router]
-    
+
     Coordinator --> DevReg[Device Registry: OpenWrt Router]
     Coordinator --> ClientDevs[Client Devices: 1 per MAC]
-    
+
     ClientDevs --> BinSens[Binary Sensor: Connectivity]
     ClientDevs --> DevTrack[Device Tracker: Home / Away]
     ClientDevs --> FwSwitch[Switch: Internet Access]
     ClientDevs --> DiagSens[Sensor: IP, RSSI, WiFi Band]
-    
+
     FwSwitch -->|Toggle OFF| BlockAction["Create/Enable UCI Firewall Rule<br/>src=lan, dest=wan, src_mac=XX, target=REJECT"]
     FwSwitch -->|Toggle ON| AllowAction["Disable/Remove UCI Firewall Rule"]
 ```
