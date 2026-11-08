@@ -8,7 +8,6 @@ from typing import Any
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -16,6 +15,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import OpenWrtDataUpdateCoordinator
+from .entity import client_device_info
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -107,25 +107,7 @@ class OpenWrtInternetAccessSwitch(
     @property
     def device_info(self) -> DeviceInfo:
         """Link this switch to its client device, connected via the router."""
-        client = self.client_data
-
-        device_name = f"Client {self._mac}"
-
-        if client and client.alias:
-            device_name = client.alias
-        elif client and client.hostname:
-            device_name = client.hostname
-
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._mac)},
-            connections={(dr.CONNECTION_NETWORK_MAC, self._mac)},
-            name=device_name,
-            manufacturer="OpenWrt Client",
-            model="Wireless Client"
-            if (client and client.is_wireless)
-            else "Wired Client",
-            via_device_id=self.coordinator.router_device_id,
-        )
+        return client_device_info(self.client_data, self._mac, self._entry.entry_id)
 
     @property
     def extra_state_attributes(self) -> dict[str, str | None]:

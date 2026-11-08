@@ -35,6 +35,8 @@ from .openwrt_client.openwrt_client import (
     OpenWrtClientError,
 )
 from .openwrt_client.openwrt_manager import OpenWrtManager
+from .sources.factory import create_source
+from .sources.manager import AccessPointSourceManager
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -99,7 +101,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator.router_info = router_info
 
     device_registry = dr.async_get(hass)
-    router_device = device_registry.async_get_or_create(
+    device_registry.async_get_or_create(
         config_entry_id=entry.entry_id,
         identifiers={(DOMAIN, entry.entry_id)},
         connections={(dr.CONNECTION_NETWORK_MAC, router_info.mac)}
@@ -110,18 +112,33 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         name=router_info.hostname or "OpenWrt Router",
         sw_version=router_info.release,
     )
-    # Store the router's device registry ID so entity platforms can use via_device_id
-    coordinator.router_device_id = router_device.id
+    coordinator.source_manager = AccessPointSourceManager(
+        {
+            source["id"]: await create_source(source)
+            for source in entry.options.get("ap_sources", [])
+            if source.get("enabled", True)
+        },
+        scan_interval_sec,
+    )
+    try:
+        await coordinator.source_manager.async_refresh()
+        await coordinator.async_config_entry_first_refresh()
 
-    # Initial data load
-    await coordinator.async_config_entry_first_refresh()
+        hass.data[DOMAIN][entry.entry_id] = coordinator
+        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    hass.data[DOMAIN][entry.entry_id] = coordinator
-
-    # Forward setup to entity platforms
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-
-    entry.async_on_unload(entry.add_update_listener(async_reload_entry))
+        coordinator.known_macs.update(coordinator.data)
+        entry.async_on_unload(
+            coordinator.async_add_listener(coordinator.discover_clients)
+        )
+        coordinator.source_manager.start(coordinator.source_updated)
+        entry.async_on_unload(entry.add_update_listener(async_reload_entry))
+    except BaseException:
+        hass.data[DOMAIN].pop(entry.entry_id, None)
+        await coordinator.async_shutdown()
+        await coordinator.source_manager.close()
+        await openwrt_client.close()
+        raise
 
     return True
 
@@ -133,6 +150,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         coordinator: OpenWrtDataUpdateCoordinator = hass.data[DOMAIN].pop(
             entry.entry_id
         )
+        if coordinator.source_manager:
+            await coordinator.source_manager.close()
         await coordinator.openwrt_manager.openwrt_client.close()
 
     return unload_ok

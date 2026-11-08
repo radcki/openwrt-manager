@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import logging
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
+from ..models import ClientDevice
 from .openwrt_client import OpenWrtClient, OpenWrtClientError
 
 _LOGGER = logging.getLogger(__name__)
@@ -53,25 +54,6 @@ class RouterInfo:
     release: str = "Unknown"
     mac: str = "00:00:00:00:00:00"
     uptime: int = 0
-
-
-@dataclass
-class ClientDevice:
-    """Represents a client device connected to OpenWrt."""
-
-    mac: str
-    ip: str | None = None
-    alias: str | None = None
-    hostname: str | None = None
-    is_online: bool = False
-    is_wireless: bool = False
-    interface: str | None = None
-    signal_dbm: int | None = None
-    rx_rate: int | None = None
-    tx_rate: int | None = None
-    internet_blocked: bool = False
-    firewall_rule_id: str | None = None
-    extra_attributes: dict[str, Any] = field(default_factory=dict)
 
 
 def normalize_mac(mac: str) -> str:
@@ -273,14 +255,14 @@ class OpenWrtManager:
         wireless_raw = await self.openwrt_client.async_run_ssh_command(
             WIRELESS_CLIENTS_CMD
         )
-        for mac, signal, rx, tx in parse_wireless_clients(wireless_raw):
+        for mac, signal, ap_rx_rate, ap_tx_rate in parse_wireless_clients(wireless_raw):
             norm_mac = normalize_mac(mac)
             client = clients.setdefault(norm_mac, ClientDevice(mac=norm_mac))
             client.is_online = True
             client.is_wireless = True
             client.signal_dbm = signal
-            client.rx_rate = rx
-            client.tx_rate = tx
+            client.rx_rate = ap_tx_rate
+            client.tx_rate = ap_rx_rate
 
         # 3. ARP table (marks active clients as online)
         arp_raw = await self.openwrt_client.async_run_ssh_command(

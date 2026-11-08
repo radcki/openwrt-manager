@@ -35,12 +35,67 @@
   "options": {
     "step": {
       "init": {
+        "title": "OpenWrt Manager",
+        "menu_options": {
+          "router": "Router settings",
+          "add_unifi": "Add UniFi source",
+          "add_openwrt": "Add OpenWrt AP",
+          "manage_sources": "Manage AP sources",
+          "remove_ap_source": "Remove AP source"
+        }
+      },
+      "router": {
         "title": "OpenWrt Router Options",
         "data": {
           "scan_interval": "Scan Interval (seconds)",
           "firewall_action": "Firewall Block Action (REJECT or DROP)"
         }
+      },
+      "source": {
+        "title": "AP telemetry source",
+        "description": "Read-only telemetry. UniFi requires a local account. TLS verification is enabled by default.",
+        "data": {
+          "name": "Name",
+          "host": "Host",
+          "port": "Port",
+          "username": "Username",
+          "password": "Password",
+          "verify_ssl": "Verify TLS certificate"
+        }
+      },
+      "site": {
+        "title": "Select UniFi site",
+        "data": {
+          "site": "Site"
+        }
+      },
+      "manage_sources": {
+        "title": "AP sources",
+        "data": {
+          "source_id": "Source"
+        }
+      },
+      "source_action": {
+        "title": "Manage source",
+        "menu_options": {
+          "source": "Edit",
+          "toggle_source": "Enable / disable",
+          "remove_source": "Remove"
+        }
+      },
+      "remove_ap_source": {
+        "title": "Remove AP source",
+        "description": "Choose the source to remove. Client devices and router firewall rules will be retained.",
+        "data": {
+          "source_id": "Source"
+        }
       }
+    },
+    "error": {
+      "source_connection_failed": "Unable to read telemetry. Check address, port, permissions, credentials and TLS certificate."
+    },
+    "abort": {
+      "no_sources": "No AP sources configured."
     }
   },
   "entity": {
@@ -60,6 +115,47 @@
       },
       "signal_strength": {
         "name": "Signal Strength"
+      },
+      "connection_type": {
+        "name": "Connection Type"
+      },
+      "access_point": {
+        "name": "Access Point"
+      },
+      "ssid": {
+        "name": "SSID"
+      },
+      "band": {
+        "name": "Wi-Fi Band"
+      },
+      "channel": {
+        "name": "Wi-Fi Channel"
+      },
+      "rx_rate": {
+        "name": "Receive Link Rate"
+      },
+      "tx_rate": {
+        "name": "Transmit Link Rate"
+      },
+      "download_rate": {
+        "name": "Download Rate"
+      },
+      "upload_rate": {
+        "name": "Upload Rate"
+      },
+      "rx_bytes": {
+        "name": "Received Data"
+      },
+      "tx_bytes": {
+        "name": "Transmitted Data"
+      },
+      "ap_source_status": {
+        "name": "AP source status",
+        "state": {
+          "connected": "Connected",
+          "unavailable": "Unavailable",
+          "disabled": "Disabled"
+        }
       }
     }
   }
