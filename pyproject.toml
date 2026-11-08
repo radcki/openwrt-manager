@@ -7,12 +7,13 @@ name = "openwrt_manager"
 version = "0.1.0"
 description = "Home Assistant custom integration for OpenWrt router client tracking and firewall access control"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.13"
 license = { text = "MIT" }
 authors = [
     { name = "Radosław Adamczewski" }
 ]
 dependencies = [
+    "aiounifi==97",
     "asyncssh>=2.14.0",
     "voluptuous>=0.13.0",
 ]

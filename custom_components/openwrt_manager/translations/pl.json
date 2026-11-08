@@ -35,12 +35,67 @@
   "options": {
     "step": {
       "init": {
+        "title": "OpenWrt Manager",
+        "menu_options": {
+          "router": "Ustawienia routera",
+          "add_unifi": "Dodaj źródło UniFi",
+          "add_openwrt": "Dodaj AP OpenWrt",
+          "manage_sources": "Zarządzaj źródłami AP",
+          "remove_ap_source": "Usuń źródło AP"
+        }
+      },
+      "router": {
         "title": "Opcje routera OpenWrt",
         "data": {
           "scan_interval": "Interwał odświeżania (sekundy)",
           "firewall_action": "Akcja blokowania zapory sieciowej (REJECT lub DROP)"
         }
+      },
+      "source": {
+        "title": "Źródło telemetrii AP",
+        "description": "Dane służą wyłącznie do odczytu telemetrii. UniFi wymaga lokalnego konta. Weryfikacja TLS jest domyślnie włączona.",
+        "data": {
+          "name": "Nazwa",
+          "host": "Host",
+          "port": "Port",
+          "username": "Użytkownik",
+          "password": "Hasło",
+          "verify_ssl": "Weryfikuj certyfikat TLS"
+        }
+      },
+      "site": {
+        "title": "Wybierz site UniFi",
+        "data": {
+          "site": "Site"
+        }
+      },
+      "manage_sources": {
+        "title": "Źródła AP",
+        "data": {
+          "source_id": "Źródło"
+        }
+      },
+      "source_action": {
+        "title": "Zarządzaj źródłem",
+        "menu_options": {
+          "source": "Edytuj",
+          "toggle_source": "Włącz / wyłącz",
+          "remove_source": "Usuń"
+        }
+      },
+      "remove_ap_source": {
+        "title": "Usuń źródło AP",
+        "description": "Wybierz źródło do usunięcia. Urządzenia klientów i reguły zapory routera pozostaną zachowane.",
+        "data": {
+          "source_id": "Źródło"
+        }
       }
+    },
+    "error": {
+      "source_connection_failed": "Nie można odczytać telemetrii. Sprawdź adres, port, uprawnienia, dane logowania i certyfikat TLS."
+    },
+    "abort": {
+      "no_sources": "Nie skonfigurowano źródeł AP."
     }
   },
   "entity": {
@@ -60,6 +115,47 @@
       },
       "signal_strength": {
         "name": "Siła sygnału"
+      },
+      "connection_type": {
+        "name": "Typ połączenia"
+      },
+      "access_point": {
+        "name": "Punkt dostępowy"
+      },
+      "ssid": {
+        "name": "SSID"
+      },
+      "band": {
+        "name": "Pasmo Wi-Fi"
+      },
+      "channel": {
+        "name": "Kanał Wi-Fi"
+      },
+      "rx_rate": {
+        "name": "Prędkość odbioru łącza"
+      },
+      "tx_rate": {
+        "name": "Prędkość nadawania łącza"
+      },
+      "download_rate": {
+        "name": "Transfer pobierania"
+      },
+      "upload_rate": {
+        "name": "Transfer wysyłania"
+      },
+      "rx_bytes": {
+        "name": "Odebrane dane"
+      },
+      "tx_bytes": {
+        "name": "Wysłane dane"
+      },
+      "ap_source_status": {
+        "name": "Stan źródła AP",
+        "state": {
+          "connected": "Połączono",
+          "unavailable": "Niedostępne",
+          "disabled": "Wyłączone"
+        }
       }
     }
   }

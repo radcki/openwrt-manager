@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -43,6 +44,26 @@ def test_parse_wireless_clients_accepts_fractional_rates():
         "garbage line\n"
     )
     assert parse_wireless_clients(raw) == [("AA:BB:CC:DD:EE:01", -52, 866, 433)]
+
+
+async def test_router_link_rates_use_client_perspective():
+    client = Mock(
+        async_ubus_call=AsyncMock(return_value={}),
+        async_run_ssh_command=AsyncMock(
+            side_effect=[
+                "AA:BB:CC:DD:EE:01 -52 dBm RX: 120 MBit/s TX: 240 MBit/s",
+                "",
+            ]
+        ),
+    )
+    manager = OpenWrtManager(client, "HA_BLOCK")
+    manager._async_get_or_create_firewall_rule = AsyncMock(return_value=None)
+    manager.async_get_glinet_aliases = AsyncMock(return_value={})
+
+    clients = await manager.async_get_clients()
+
+    assert clients["AA:BB:CC:DD:EE:01"].rx_rate == 240
+    assert clients["AA:BB:CC:DD:EE:01"].tx_rate == 120
 
 
 class FakeClient:

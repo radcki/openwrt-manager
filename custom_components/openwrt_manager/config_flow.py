@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Mapping
 from typing import Any
+from uuid import uuid4
 
 import voluptuous as vol
 from homeassistant import config_entries
@@ -36,6 +38,9 @@ from .openwrt_client.openwrt_client import (
     OpenWrtClient,
 )
 from .openwrt_client.openwrt_manager import OpenWrtManager
+from .sources.factory import create_source
+from .sources.openwrt import OpenWrtAccessPointSource
+from .sources.unifi import UniFiSource
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -190,9 +195,228 @@ class OpenWrtOptionsFlow(config_entries.OptionsFlow):
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
+        """Offer router options and any number of additional AP sources."""
+        return self.async_show_menu(
+            step_id="init",
+            menu_options=[
+                "router",
+                "add_unifi",
+                "add_openwrt",
+                "manage_sources",
+                "remove_ap_source",
+            ],
+        )
+
+    def _save_source(self, source: dict[str, Any] | None) -> FlowResult:
+        sources = list(self.config_entry.options.get("ap_sources", []))
+        source_id = self._source_config["id"]
+        sources = [existing for existing in sources if existing["id"] != source_id]
+        if source is not None:
+            original = list(self.config_entry.options.get("ap_sources", []))
+            index = next(
+                (
+                    index
+                    for index, item in enumerate(original)
+                    if item["id"] == source_id
+                ),
+                len(sources),
+            )
+            sources.insert(index, source)
+        return self.async_create_entry(
+            title="", data={**self.config_entry.options, "ap_sources": sources}
+        )
+
+    async def async_step_add_unifi(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Configure an independent UniFi controller/site connection."""
+        self._source_config = {"id": uuid4().hex, "type": "unifi", "enabled": True}
+        return await self.async_step_source()
+
+    async def async_step_add_openwrt(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Configure an independent OpenWrt AP connection."""
+        self._source_config = {"id": uuid4().hex, "type": "openwrt", "enabled": True}
+        return await self.async_step_source()
+
+    async def async_step_manage_sources(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Select an instance by ID rather than by source type."""
+        sources = self.config_entry.options.get("ap_sources", [])
+        if not sources:
+            return self.async_abort(reason="no_sources")
+        if user_input is not None:
+            self._source_config = dict(
+                next(
+                    source
+                    for source in sources
+                    if source["id"] == user_input["source_id"]
+                )
+            )
+            return await self.async_step_source_action()
+        return self.async_show_form(
+            step_id="manage_sources",
+            data_schema=self._source_selection_schema(),
+        )
+
+    async def async_step_source_action(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Present the selected source's actions as a registered HA flow step."""
+        return self.async_show_menu(
+            step_id="source_action",
+            menu_options=["source", "toggle_source", "remove_source"],
+        )
+
+    def _source_selection_schema(self) -> vol.Schema:
+        """Label instances by name, type and host while persisting their IDs."""
+        return vol.Schema(
+            {
+                vol.Required("source_id"): vol.In(
+                    {
+                        source[
+                            "id"
+                        ]: f"{source['name']} ({source['type']}, {source['host']})"
+                        for source in self.config_entry.options.get("ap_sources", [])
+                    }
+                )
+            }
+        )
+
+    async def async_step_remove_ap_source(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Offer source removal directly from the main options menu."""
+        sources = self.config_entry.options.get("ap_sources", [])
+        if not sources:
+            return self.async_abort(reason="no_sources")
+        if user_input is not None:
+            self._source_config = dict(
+                next(
+                    source
+                    for source in sources
+                    if source["id"] == user_input["source_id"]
+                )
+            )
+            return self._save_source(None)
+        return self.async_show_form(
+            step_id="remove_ap_source", data_schema=self._source_selection_schema()
+        )
+
+    async def async_step_toggle_source(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Enable or disable only the selected instance."""
+        self._source_config["enabled"] = not self._source_config.get("enabled", True)
+        return self._save_source(self._source_config)
+
+    async def async_step_remove_source(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Remove a source without removing client entities or firewall rules."""
+        return self._save_source(None)
+
+    async def async_step_source(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Validate credentials before persisting source configuration."""
+        errors: dict[str, str] = {}
+        config = self._source_config
+        if user_input is not None:
+            config = {**config, **user_input, "host": user_input["host"].strip()}
+            source = await create_source(config)
+            try:
+                async with asyncio.timeout(30):
+                    if isinstance(source, UniFiSource):
+                        self._sites = await source.async_sites()
+                        if not self._sites:
+                            raise ValueError("No accessible sites")
+                    else:
+                        await source.async_refresh()
+                        if isinstance(source, OpenWrtAccessPointSource):
+                            config["host_key"] = source.client.host_key
+            except Exception as error:
+                _LOGGER.warning(
+                    "AP source validation failed (%s)", type(error).__name__
+                )
+                errors["base"] = "source_connection_failed"
+            finally:
+                await source.close()
+            if not errors:
+                self._source_config = config
+                if config["type"] == "unifi":
+                    return await self.async_step_site()
+                return self._save_source(config)
+        fields: dict[Any, Any] = {
+            vol.Required("name", default=config.get("name", "")): vol.All(
+                str, vol.Length(min=1)
+            ),
+            vol.Required(CONF_HOST, default=config.get(CONF_HOST, "")): vol.All(
+                str, vol.Length(min=1)
+            ),
+            vol.Required(
+                CONF_PORT,
+                default=config.get(CONF_PORT, 443 if config["type"] == "unifi" else 22),
+            ): vol.All(int, vol.Range(min=1, max=65535)),
+            vol.Required(
+                CONF_USERNAME,
+                default=config.get(
+                    CONF_USERNAME, "" if config["type"] == "unifi" else "root"
+                ),
+            ): str,
+            vol.Required(CONF_PASSWORD, default=config.get(CONF_PASSWORD, "")): str,
+        }
+        if config["type"] == "unifi":
+            fields[
+                vol.Required("verify_ssl", default=config.get("verify_ssl", True))
+            ] = bool
+        return self.async_show_form(
+            step_id="source", data_schema=vol.Schema(fields), errors=errors
+        )
+
+    async def async_step_site(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Choose and validate the controller site used for telemetry."""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            config = {**self._source_config, "site": user_input["site"]}
+            source = await create_source(config)
+            try:
+                async with asyncio.timeout(30):
+                    await source.async_refresh()
+            except Exception as error:
+                _LOGGER.warning("AP site validation failed (%s)", type(error).__name__)
+                errors["base"] = "source_connection_failed"
+            finally:
+                await source.close()
+            if not errors:
+                return self._save_source(config)
+        return self.async_show_form(
+            step_id="site",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        "site",
+                        default=self._source_config.get(
+                            "site", next(iter(self._sites))
+                        ),
+                    ): vol.In(self._sites)
+                }
+            ),
+            errors=errors,
+        )
+
+    async def async_step_router(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
         """Manage options for OpenWrt router."""
         if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
+            return self.async_create_entry(
+                title="", data={**self.config_entry.options, **user_input}
+            )
 
         current_interval = self.config_entry.options.get(
             CONF_SCAN_INTERVAL,
@@ -214,4 +438,4 @@ class OpenWrtOptionsFlow(config_entries.OptionsFlow):
             }
         )
 
-        return self.async_show_form(step_id="init", data_schema=options_schema)
+        return self.async_show_form(step_id="router", data_schema=options_schema)

@@ -39,6 +39,50 @@ I wanted to easily block and unblock individual IoT devices from internet access
 
 ---
 
+## Additional access point telemetry
+
+In the integration's **Configure** menu, choose **Add UniFi source** or
+**Add OpenWrt AP**. Repeat for every controller/site or access point. Multiple
+sources of the same type are supported, each with independent credentials,
+connections and diagnostic status. **Manage AP sources** lets you edit,
+disable, enable or remove a source. Router options preserve the source list.
+
+- **UniFi:** enter the controller hostname, HTTPS port (normally 443 for UniFi
+  OS, 8443 for standalone Network Application), local account credentials and
+  select a site. TLS certificate verification is enabled by default; turn it off
+  explicitly only if your controller uses an untrusted certificate. This uses
+  `aiounifi`, not Home Assistant's UniFi entities. Local accounts without MFA are
+  required for this authentication mode. Hosting in Proxmox/LXC needs no special
+  integration, provided HA can reach the controller.
+- **OpenWrt AP:** enter SSH credentials for each additional AP. The AP needs
+  `ubus` with `iwinfo` support (`rpcd-mod-iwinfo`) for radio/association data and
+  `iw` for byte counters. The SSH host key is pinned when saving configuration.
+  A changed host key requires removing and adding that source again.
+
+Only clients discovered by the main router are enriched. They retain their
+existing device and entity IDs, and internet access switches still exclusively
+modify the **main OpenWrt router's firewall**. AP sources never modify firewall
+or UniFi configuration.
+
+Client sensors expose the current AP using the configured source name (the
+integration entry title for the main router's Wi-Fi). Stable AP ID, AP name
+reported by the controller and MAC remain available as attributes, alongside
+SSID, band, channel, RSSI, receive/transmit link rates, measured download/upload
+rates and byte counters when available. All directions use the **client's
+perspective**. Traffic includes local LAN traffic; it is not WAN-only usage.
+Byte-counter entities are disabled by default and can be enabled per client.
+Counters describe the current source/association, not a lifetime total across
+APs. A first sample, roaming, expired association or counter reset produces no
+throughput value until a comparable second sample exists.
+
+UniFi uses websocket updates plus periodic reconciliation. OpenWrt APs are
+polled at the integration scan interval (default 15 seconds). AP history uses
+Home Assistant Recorder's normal retention and exclusions. Source failures are
+isolated and retried with backoff; observations expire after two scan intervals.
+Loss of AP telemetry clears current AP metrics rather than labelling a known
+wireless client as Ethernet. Router observations continue to determine presence
+when no current wireless association is available.
+
 ## Development & Local Testing
 
 ### 1. Environment Setup with `uv`
@@ -63,6 +107,15 @@ uv run mypy custom_components/openwrt_manager
 uv run pytest
 ```
 
+Framework contract tests can also run without adding test dependencies to the
+Home Assistant image:
+
+```bash
+docker run --rm --network none --entrypoint python \
+  -e PYTHONPATH=/workspace -v "$PWD:/workspace:ro" -w /workspace \
+  ghcr.io/home-assistant/home-assistant:stable tests/homeassistant_contracts.py
+```
+
 ### 3. Running Home Assistant via Docker Dev Environment
 
 ```bash
@@ -70,15 +123,3 @@ docker compose up -d
 ```
 
 Access Home Assistant at `http://localhost:8123`.
-
----
-
-## Architecture Overview
-
-For each router's client device following entities are created:
-
-- Device Tracker - Can be assigned to person to indicate presence
-- Binary Sensor - Connectivity (Is online?)
-- Switch - Internet Access (Is not blocked by manager firewall rule?)
-- Sensor - IP Address
-- Sensor - Signal Strenght
